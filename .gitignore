@@ -1,0 +1,24 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Cachés de Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Imagen de Tux — se descarga aparte (ver README), no se versiona
+# porque es un asset externo (Wikimedia), no código propio del proyecto.
+app/gui/assets/tux.png
+
+# Archivos de sistema/editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# Logs y archivos temporales de pruebas
+*.log
+_test_*.py

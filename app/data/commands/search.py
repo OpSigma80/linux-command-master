@@ -1,0 +1,68 @@
+from app.data.models import Command, Level, Risk
+
+COMMANDS: list[Command] = [
+    Command(
+        id="find", name="find", category="search", subcategory="find-content",
+        description="Busca archivos y directorios recorriendo el árbol de directorios en tiempo real, con múltiples filtros.",
+        syntax="find [ruta] [criterios] [acción]",
+        examples=[
+            "find . -name '*.py'",
+            "find /var/log -mtime -7",
+            "find . -type f -size +10M",
+            "find . -name '*.tmp' -exec rm {} \\;",
+        ],
+        when_to_use="Búsquedas complejas por nombre, tipo, tamaño, fecha o para ejecutar acciones sobre los resultados.",
+        options=["-name", "-type f/d", "-mtime", "-size", "-exec"],
+        precautions="find + -exec rm es potente pero peligroso: probar antes con -exec echo {} \\;",
+        related=["locate", "grep", "xargs"], tags=["search", "automation"],
+        level=Level.INTERMEDIO, risk=Risk.PRECAUCION,
+    ),
+    Command(
+        id="locate", name="locate", category="search", subcategory="find-content",
+        description="Busca archivos por nombre usando un índice precalculado (mucho más rápido que find, pero puede no estar actualizado).",
+        syntax="locate patrón",
+        examples=["locate archivo.conf", "sudo updatedb  # actualizar el índice"],
+        when_to_use="Búsquedas rápidas por nombre en todo el sistema cuando la velocidad importa más que la actualidad.",
+        related=["find"], tags=["search"], level=Level.BASICO,
+    ),
+    Command(
+        id="rg", name="rg (ripgrep)", category="search", subcategory="find-content",
+        description="Buscador de texto en archivos, similar a grep pero mucho más rápido y con exclusión automática de .gitignore.",
+        syntax="rg patrón [ruta]",
+        examples=["rg 'TODO' ./src", "rg -i 'error'"],
+        when_to_use="Búsquedas de texto en proyectos grandes de código, más rápido que grep -R.",
+        related=["grep", "find"], tags=["search", "text"], level=Level.INTERMEDIO,
+    ),
+    Command(
+        id="which", name="which", category="search", subcategory="find-commands",
+        description="Muestra la ruta del ejecutable que se invocaría al escribir un comando.",
+        syntax="which comando",
+        examples=["which python3", "which docker"],
+        when_to_use="Verificar qué binario concreto se ejecuta (útil con múltiples versiones instaladas).",
+        related=["whereis", "type"], tags=["search"], level=Level.BASICO,
+    ),
+    Command(
+        id="whereis", name="whereis", category="search", subcategory="find-commands",
+        description="Localiza el binario, el código fuente y la página de manual de un comando.",
+        syntax="whereis comando",
+        examples=["whereis grep"],
+        when_to_use="Cuando necesitas también la ubicación del manual, no solo el binario.",
+        related=["which"], tags=["search", "help"], level=Level.BASICO,
+    ),
+    Command(
+        id="type", name="type", category="search", subcategory="find-commands",
+        description="Indica si un nombre es un alias, función, builtin o ejecutable del shell.",
+        syntax="type comando",
+        examples=["type cd", "type ls"],
+        when_to_use="Distinguir si un comando es un builtin de bash o un binario externo.",
+        related=["which", "command"], tags=["search", "bash"], level=Level.INTERMEDIO,
+    ),
+    Command(
+        id="command", name="command", category="search", subcategory="find-commands",
+        description="Ejecuta un comando ignorando funciones o alias con el mismo nombre.",
+        syntax="command comando",
+        examples=["command ls  # ignora alias de ls"],
+        when_to_use="Dentro de scripts, para evitar que un alias sobrescriba el comportamiento esperado.",
+        related=["type"], tags=["search", "bash", "scripting"], level=Level.AVANZADO,
+    ),
+]

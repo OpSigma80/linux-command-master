@@ -1,0 +1,112 @@
+"""Traducciones EN -- categoria "permissions" (Permisos, Usuarios e Identidad)."""
+
+COMMAND_EN: dict[str, dict] = {
+    "chmod": {
+        "description": "Changes the read/write/execute permissions of a file or directory.",
+        "syntax": "chmod [mode] file",
+        "when_to_use": "Adjust who can read, write or execute a file.",
+        "options": ["u/g/o/a (user/group/others/all)", "r/w/x", "-R (recursive)"],
+        "precautions": "chmod -R 777 opens up full permissions insecurely; avoid it except for local testing.",
+    },
+    "chown": {
+        "description": "Changes the owner (user and/or group) of a file or directory.",
+        "syntax": "chown user:group file",
+        "examples": ["chown user file.txt", "chown -R www-data:www-data /var/www"],
+        "when_to_use": "Reassign file ownership, typical in web deployments or Docker.",
+        "options": ["-R (recursive)"],
+        "precautions": "With -R on the wrong path you can change ownership of system files; verify the path before running.",
+    },
+    "chgrp": {
+        "description": "Changes the owning group of a file or directory.",
+        "syntax": "chgrp group file",
+        "examples": ["chgrp developers file.txt"],
+        "when_to_use": "Change only the group without touching the owning user.",
+    },
+    "umask": {
+        "description": "Sets the default permissions used when new files/directories are created.",
+        "syntax": "umask [value]",
+        "when_to_use": "Configure the default permission policy for a session or script.",
+    },
+    "sudo": {
+        "description": "Runs a command with another user's privileges (usually root).",
+        "syntax": "sudo command",
+        "examples": ["sudo apt update", "sudo -u www-data command"],
+        "when_to_use": "Run one-off administrative actions without logging in as root.",
+        "precautions": "Every sudo command has full privileges: review the command carefully before confirming it.",
+    },
+    "su": {
+        "description": "Switches user within the current session (root by default).",
+        "syntax": "su [user]",
+        "examples": ["su -", "su user"],
+        "when_to_use": "Open a full session as another user, unlike sudo which runs a single command.",
+        "precautions": "A session left open as root is exposed if you leave the terminal unattended; use 'exit' when done.",
+    },
+    "id": {
+        "description": "Shows the UID, GID and groups of the current user or another user.",
+        "syntax": "id [user]",
+        "examples": ["id", "id www-data"],
+        "when_to_use": "Verify identity and group membership, useful when debugging permissions.",
+    },
+    "whoami": {
+        "description": "Shows the name of the user running the current session.",
+        "syntax": "whoami",
+        "when_to_use": "Quickly confirm which user you're working as.",
+    },
+    "who": {
+        "description": "Shows which users currently have a session open on the system.",
+        "syntax": "who",
+        "when_to_use": "Audit active sessions on a shared server.",
+    },
+    "groups": {
+        "description": "Shows which groups a user belongs to.",
+        "syntax": "groups [user]",
+        "examples": ["groups", "groups www-data"],
+        "when_to_use": "Check group permissions before debugging access issues.",
+    },
+    "passwd": {
+        "description": "Changes a user's password.",
+        "syntax": "passwd [user]",
+        "examples": ["passwd", "sudo passwd user"],
+        "when_to_use": "Change your own password, or another user's with sudo.",
+    },
+    "useradd": {
+        "description": "Creates a new user on the system.",
+        "syntax": "sudo useradd [options] user",
+        "examples": ["sudo useradd -m -s /bin/bash new_user"],
+        "when_to_use": "Create user accounts on servers or WSL environments.",
+        "options": ["-m (create home)", "-s (default shell)"],
+    },
+    "usermod": {
+        "description": "Modifies attributes of an existing user (groups, shell, home).",
+        "syntax": "sudo usermod [options] user",
+        "examples": ["sudo usermod -aG docker user"],
+        "when_to_use": "Add a user to a group (e.g: the docker group) without recreating them.",
+        "options": ["-aG (add to group)"],
+    },
+    "userdel": {
+        "description": "Removes a user from the system.",
+        "syntax": "sudo userdel [-r] user",
+        "examples": ["sudo userdel -r user"],
+        "when_to_use": "Deactivate a user account.",
+        "options": ["-r (also removes the home directory)"],
+        "precautions": "With -r the user's home directory is also permanently deleted.",
+    },
+    "groupadd": {
+        "description": "Creates a new group on the system.",
+        "syntax": "sudo groupadd group",
+        "examples": ["sudo groupadd developers"],
+        "when_to_use": "Organize users into groups with shared permissions.",
+    },
+    "groupdel": {
+        "description": "Removes a group from the system.",
+        "syntax": "sudo groupdel group",
+        "examples": ["sudo groupdel temporary"],
+        "when_to_use": "Remove a group that's no longer used.",
+    },
+    "getent": {
+        "description": "Queries the system's administrative databases (users, groups, hosts).",
+        "syntax": "getent database key",
+        "examples": ["getent passwd user", "getent group docker"],
+        "when_to_use": "Check whether a user/group exists without relying on /etc/passwd's format.",
+    },
+}

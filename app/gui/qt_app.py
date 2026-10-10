@@ -1,12 +1,13 @@
 """
-Interfaz PyQt6 (Proof of Concept v2) — reemplazo de la GUI Tkinter.
+Interfaz PyQt6 (Proof of Concept v4) — reemplazo de la GUI Tkinter.
 
-Objetivo: transparencia REAL de paneles con blur sobre el fondo de aurora,
-imitando la estética de proyectos como "whydied".
+Vidrio esmerilado real sin QGraphicsEffect: el fondo se desenfoca una vez
+con Pillow y cada panel pinta el trozo borroso que tiene debajo, con un
+tinte translúcido encima. El texto se dibuja nítido.
 
-Fix v2: el QGraphicsBlurEffect se aplica SOLO al fondo de los paneles
-(un QFrame hijo), no al contenido. Así el texto y botones quedan nítidos
-mientras el fondo detrás se ve difuminado (efecto vidrio esmerilado real).
+v4: imagen espejada para que el pingüino quede a la derecha, columna libre
+a la derecha para verlo, paneles más translúcidos y degradado oscuro a la
+izquierda para legibilidad.
 
 Estado: Proof of Concept. NO integra todavía con app/core.
 """
@@ -14,146 +15,184 @@ Estado: Proof of Concept. NO integra todavía con app/core.
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QPoint, QRect
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
+from PIL import Image, ImageFilter, ImageOps
+from PyQt6.QtCore import QPoint, QRectF, Qt
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QLabel,
-    QVBoxLayout,
     QHBoxLayout,
-    QPushButton,
+    QLabel,
     QLineEdit,
-    QGraphicsBlurEffect,
-    QGraphicsDropShadowEffect,
-    QFrame,
+    QMainWindow,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 
 ASSETS = Path(__file__).parent / "assets"
 BACKGROUND_PATH = ASSETS / "background.jpg"
 
+# --- Ajustes rápidos de diseño ---
+MIRROR_BACKGROUND = True   # True: el pingüino pasa de la izquierda a la derecha
+BLUR_RADIUS = 10           # menos = fondo más reconocible
+FREE_RIGHT_COLUMN = 260    # px libres a la derecha para ver el pingüino
+LEFT_DARKEN_ALPHA = 150    # 0-255, oscurece el lado izquierdo (legibilidad)
 
-class FrostedPanel(QFrame):
-    """Panel con efecto 'vidrio esmerilado' real.
 
-    Estructura:
-        FrostedPanel (QFrame)
-          └─ _blur_layer (QFrame)  ← fondo con rgba + blur, detrás de todo
-          └─ _content (QWidget)     ← contenido NÍTIDO, encima del blur
+def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Escala y recorta la imagen para cubrir w x h (como background-size: cover)."""
+    scale = max(w / img.width, h / img.height)
+    nw, nh = int(img.width * scale) + 1, int(img.height * scale) + 1
+    img = img.resize((nw, nh), Image.LANCZOS)
+    left, top = (nw - w) // 2, (nh - h) // 2
+    return img.crop((left, top, left + w, top + h))
 
-    El blur SOLO se aplica al _blur_layer, nunca al contenido.
-    """
+
+def _to_pixmap(img: Image.Image) -> QPixmap:
+    img = img.convert("RGBA")
+    qimg = QImage(
+        img.tobytes("raw", "RGBA"),
+        img.width,
+        img.height,
+        QImage.Format.Format_RGBA8888,
+    ).copy()
+    return QPixmap.fromImage(qimg)
+
+
+class BackgroundWidget(QWidget):
+    """Dibuja el fondo nítido y guarda una versión desenfocada para los paneles."""
 
     def __init__(
         self,
+        image_path: Path,
+        blur_radius: int = 10,
+        mirror: bool = False,
         parent=None,
-        opacity: float = 0.55,
-        radius: int = 12,
-        border_alpha: int = 100,
-        blur_radius: int = 15,
     ):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-
-        # --- Capa de fondo con blur ---
-        self._blur_layer = QFrame(self)
-        self._blur_layer.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, True
-        )
-        alpha = int(opacity * 255)
-        self._blur_layer.setStyleSheet(
-            f"""
-            background-color: rgba(10, 15, 30, {alpha});
-            border: 1px solid rgba(80, 130, 200, {border_alpha});
-            border-radius: {radius}px;
-            """
-        )
-        # El blur se aplica SOLO a esta capa de fondo
-        blur = QGraphicsBlurEffect()
-        blur.setBlurRadius(blur_radius)
-        blur.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
-        self._blur_layer.setGraphicsEffect(blur)
-
-        # --- Capa de contenido (nítida) ---
-        self._content = QWidget(self)
-        self._content.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, True
-        )
-        self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(16, 14, 16, 14)
-        self._content_layout.setSpacing(6)
-
-    def content_layout(self) -> QVBoxLayout:
-        return self._content_layout
-
-    def set_content_layout(self, layout) -> None:
-        self._content_layout = layout
+        if Path(image_path).exists():
+            src = Image.open(image_path).convert("RGB")
+        else:
+            src = Image.new("RGB", (16, 16), (8, 8, 16))
+        self._src = ImageOps.mirror(src) if mirror else src
+        self._blur_radius = blur_radius
+        self._sharp = QPixmap()
+        self._blurred = QPixmap()
 
     def resizeEvent(self, event) -> None:
-        """Mantiene la capa de blur cubriendo el panel entero y el contenido
-        encima con márgenes cómodos."""
+        w, h = max(1, self.width()), max(1, self.height())
+        base = _cover(self._src, w, h)
+        self._sharp = _to_pixmap(base)
+
+        # Se desenfoca a 1/4 de tamaño (mucho más rápido) y se reescala suave.
+        small = base.resize((max(1, w // 4), max(1, h // 4)), Image.LANCZOS)
+        small = small.filter(ImageFilter.GaussianBlur(max(1, self._blur_radius // 4)))
+        self._blurred = _to_pixmap(small).scaled(
+            w,
+            h,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        for panel in self.findChildren(FrostedPanel):
+            panel.update()
         super().resizeEvent(event)
-        self._blur_layer.setGeometry(0, 0, self.width(), self.height())
-        self._content.setGeometry(0, 0, self.width(), self.height())
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._sharp)
+
+        # Degradado oscuro: fuerte a la izquierda, transparente hacia la derecha.
+        grad = QLinearGradient(0, 0, self.width(), 0)
+        grad.setColorAt(0.0, QColor(4, 6, 14, LEFT_DARKEN_ALPHA))
+        grad.setColorAt(0.65, QColor(4, 6, 14, 0))
+        painter.fillRect(self.rect(), grad)
+
+    def blurred(self) -> QPixmap:
+        return self._blurred
 
 
-def add_text_shadow(widget: QWidget, blur: int = 6, offset: int = 2):
-    """Añade sombra negra a un widget de texto para legibilidad universal."""
-    effect = QGraphicsDropShadowEffect()
-    effect.setBlurRadius(blur)
-    effect.setColor(QColor(0, 0, 0, 220))
-    effect.setOffset(offset, offset)
-    widget.setGraphicsEffect(effect)
+class FrostedPanel(QWidget):
+    """Panel de cristal esmerilado. Los hijos se dibujan nítidos encima."""
+
+    def __init__(
+        self,
+        background: BackgroundWidget,
+        tint: QColor = QColor(8, 14, 28, 120),
+        radius: int = 12,
+        margins: tuple = (16, 14, 16, 14),
+        horizontal: bool = False,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._bg = background
+        self._tint = tint
+        self._radius = radius
+        self._layout = QHBoxLayout(self) if horizontal else QVBoxLayout(self)
+        self._layout.setContentsMargins(*margins)
+        self._layout.setSpacing(8 if horizontal else 6)
+
+    def content_layout(self):
+        return self._layout
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, self._radius, self._radius)
+
+        painter.save()
+        painter.setClipPath(path)
+        origin = self.mapTo(self._bg, QPoint(0, 0))
+        painter.drawPixmap(
+            0, 0, self._bg.blurred(), origin.x(), origin.y(), self.width(), self.height()
+        )
+        painter.fillRect(self.rect(), self._tint)
+        painter.restore()
+
+        painter.setPen(QPen(QColor(80, 130, 200, 110), 1))
+        painter.drawPath(path)
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Linux Command Master — PyQt6 PoC v2")
+        self.setWindowTitle("Linux Command Master — PyQt6 PoC v4")
         self.resize(1100, 680)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-
-        self._bg_pixmap = QPixmap(str(BACKGROUND_PATH))
         self._old_pos: QPoint | None = None
 
-        central = QWidget(self)
-        self.setCentralWidget(central)
+        bg = BackgroundWidget(
+            BACKGROUND_PATH, blur_radius=BLUR_RADIUS, mirror=MIRROR_BACKGROUND
+        )
+        self.setCentralWidget(bg)
 
-        main_layout = QVBoxLayout(central)
+        main_layout = QVBoxLayout(bg)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(14)
 
         # ============ Barra superior ============
-        top_bar = QFrame(central)
-        top_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        top_bar = FrostedPanel(
+            bg,
+            tint=QColor(8, 14, 28, 150),
+            radius=10,
+            margins=(14, 8, 14, 8),
+            horizontal=True,
+        )
         top_bar.setFixedHeight(56)
-
-        top_bar_bg = QFrame(top_bar)
-        top_bar_bg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        top_bar_bg.setStyleSheet(
-            """
-            background-color: rgba(10, 15, 30, 200);
-            border: 1px solid rgba(80, 130, 200, 120);
-            border-radius: 10px;
-            """
-        )
-        top_bar_blur = QGraphicsBlurEffect()
-        top_bar_blur.setBlurRadius(12)
-        top_bar_bg.setGraphicsEffect(top_bar_blur)
-
-        top_bar_content = QWidget(top_bar)
-        top_bar_content.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, True
-        )
-        top_layout = QHBoxLayout(top_bar_content)
-        top_layout.setContentsMargins(14, 8, 14, 8)
-        top_layout.setSpacing(8)
+        tl = top_bar.content_layout()
 
         self._btn_inicio = QPushButton("Inicio")
         self._btn_atras = QPushButton("← Atrás")
@@ -162,25 +201,13 @@ class MainWindow(QMainWindow):
         self._btn_close.clicked.connect(self.close)
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText(
-            "Buscar comando (ej: docker, grep, permisos)..."
-        )
+        self._search.setPlaceholderText("Buscar comando (ej: docker, grep, permisos)...")
         self._search.setMinimumHeight(32)
 
-        top_layout.addWidget(self._btn_inicio)
-        top_layout.addWidget(self._btn_atras)
-        top_layout.addWidget(self._search, stretch=1)
-        top_layout.addWidget(self._btn_close)
-
-        # Guardar referencias para resize
-        top_bar._bg = top_bar_bg
-        top_bar._content = top_bar_content
-        top_bar.resizeEvent = lambda e: (
-            top_bar_bg.setGeometry(0, 0, top_bar.width(), top_bar.height()),
-            top_bar_content.setGeometry(0, 0, top_bar.width(), top_bar.height()),
-        )
-
-        self._style_inputs(top_bar)
+        tl.addWidget(self._btn_inicio)
+        tl.addWidget(self._btn_atras)
+        tl.addWidget(self._search, stretch=1)
+        tl.addWidget(self._btn_close)
 
         main_layout.addWidget(top_bar)
 
@@ -189,16 +216,14 @@ class MainWindow(QMainWindow):
         body_layout.setSpacing(14)
 
         # --- Sidebar ---
-        sidebar = FrostedPanel(opacity=0.55, radius=12, blur_radius=15)
-        sidebar.setFixedWidth(320)
+        sidebar = FrostedPanel(bg, tint=QColor(8, 14, 28, 125))
+        sidebar.setFixedWidth(300)
         sl = sidebar.content_layout()
 
         sidebar_title = QLabel("Categorías")
         sidebar_title.setStyleSheet(
-            "color: #4d9dff; font-size: 15pt; font-weight: bold; "
-            "background: transparent;"
+            "color: #6fb3ff; font-size: 15pt; font-weight: bold; background: transparent;"
         )
-        add_text_shadow(sidebar_title, blur=8, offset=2)
         sl.addWidget(sidebar_title)
         sl.addSpacing(6)
 
@@ -214,68 +239,54 @@ class MainWindow(QMainWindow):
         ]:
             item = QLabel(f"▸  {cat}")
             item.setStyleSheet(
-                "color: #ffffff; font-size: 10pt; "
-                "padding: 4px 2px; background: transparent;"
+                "color: #ffffff; font-size: 10pt; padding: 4px 2px; background: transparent;"
             )
-            add_text_shadow(item, blur=5, offset=1)
             sl.addWidget(item)
 
         sl.addStretch()
 
         # --- Panel de detalle ---
-        detail = FrostedPanel(opacity=0.50, radius=12, blur_radius=18)
-
+        detail = FrostedPanel(bg, tint=QColor(8, 14, 28, 110), margins=(32, 28, 32, 28))
         dl = detail.content_layout()
-        dl.setContentsMargins(32, 28, 32, 28)
         dl.setSpacing(10)
 
         title = QLabel("Linux Command Master")
         title.setStyleSheet(
-            "color: #ffffff; font-size: 30pt; font-weight: bold; "
-            "background: transparent;"
+            "color: #ffffff; font-size: 30pt; font-weight: bold; background: transparent;"
         )
-        add_text_shadow(title, blur=12, offset=3)
 
         subtitle = QLabel(
-            "Selecciona una categoría en el panel izquierdo "
-            "o busca un comando arriba."
+            "Selecciona una categoría en el panel izquierdo o busca un comando arriba."
         )
-        subtitle.setStyleSheet(
-            "color: #e0e8f5; font-size: 12pt; background: transparent;"
-        )
+        subtitle.setStyleSheet("color: #e0e8f5; font-size: 12pt; background: transparent;")
         subtitle.setWordWrap(True)
-        add_text_shadow(subtitle, blur=6, offset=1)
 
         dl.addWidget(title)
         dl.addWidget(subtitle)
         dl.addSpacing(24)
 
         info = QLabel(
-            "🎨  Proof of Concept de PyQt6\n\n"
-            "•  Paneles con transparencia REAL (rgba)\n"
-            "•  Blur del fondo (vidrio esmerilado)\n"
-            "•  Bordes redondeados nativos\n"
-            "•  Fondo de aurora visible detrás de todo\n"
-            "•  Texto con sombra para legibilidad universal\n"
-            "•  Blur separado del contenido — texto nítido"
+            "Proof of Concept de PyQt6\n\n"
+            "•  Paneles de cristal esmerilado (fondo desenfocado con Pillow)\n"
+            "•  Sin QGraphicsEffect: texto siempre nítido\n"
+            "•  Bordes redondeados\n"
+            "•  Fondo de aurora visible detrás de todo"
         )
-        info.setStyleSheet(
-            "color: #c8d4e8; font-size: 11pt; line-height: 170%; "
-            "background: transparent;"
-        )
+        info.setStyleSheet("color: #d0dcf0; font-size: 11pt; background: transparent;")
         info.setWordWrap(True)
-        add_text_shadow(info, blur=5, offset=1)
 
         dl.addWidget(info)
         dl.addStretch()
 
         body_layout.addWidget(sidebar)
         body_layout.addWidget(detail, stretch=1)
-
+        body_layout.addSpacing(FREE_RIGHT_COLUMN)  # zona libre: se ve el pingüino
         main_layout.addLayout(body_layout, stretch=1)
 
-    def _style_inputs(self, parent: QWidget) -> None:
-        parent.setStyleSheet(
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet(
             """
             QPushButton {
                 background-color: rgba(77, 157, 255, 240);
@@ -287,12 +298,8 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
                 min-height: 22px;
             }
-            QPushButton:hover {
-                background-color: rgba(111, 179, 255, 255);
-            }
-            QPushButton:pressed {
-                background-color: rgba(50, 120, 220, 255);
-            }
+            QPushButton:hover { background-color: rgba(111, 179, 255, 255); }
+            QPushButton:pressed { background-color: rgba(50, 120, 220, 255); }
             QLineEdit {
                 background-color: rgba(5, 10, 20, 220);
                 color: #ffffff;
@@ -302,26 +309,8 @@ class MainWindow(QMainWindow):
                 font-size: 10pt;
                 selection-background-color: rgba(77, 157, 255, 180);
             }
-            QLineEdit::placeholder {
-                color: #8899aa;
-            }
             """
         )
-
-    def paintEvent(self, event) -> None:
-        """Dibuja la imagen de fondo (aurora) cubriendo toda la ventana."""
-        painter = QPainter(self)
-        if not self._bg_pixmap.isNull():
-            scaled = self._bg_pixmap.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            x = (scaled.width() - self.width()) // 2
-            y = (scaled.height() - self.height()) // 2
-            painter.drawPixmap(-x, -y, scaled)
-        else:
-            painter.fillRect(self.rect(), QColor("#080810"))
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

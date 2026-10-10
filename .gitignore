@@ -11,7 +11,6 @@ __pycache__/
 
 # Imagen de Tux — se descarga aparte (ver README), no se versiona
 # porque es un asset externo (Wikimedia), no código propio del proyecto.
-app/gui/assets/tux.png
 
 # Archivos de sistema/editor
 .DS_Store
@@ -22,3 +21,4 @@ Thumbs.db
 # Logs y archivos temporales de pruebas
 *.log
 _test_*.py
+*.bak*

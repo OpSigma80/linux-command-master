@@ -1,3 +1,5 @@
+<img width="1257" height="693" alt="Captura de pantalla 2026-10-10 154718" src="https://github.com/user-attachments/assets/9c8ecedd-b6ed-4b4d-96c1-f4f5f6973ba9" />
+
 # Linux Command Master
 
 An interactive cheatsheet and advanced command finder for Linux, focused
